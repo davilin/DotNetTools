@@ -3,6 +3,9 @@
 
 using Microsoft.Extensions.CommandLineUtils;
 using Microsoft.Extensions.Logging;
+using System.Diagnostics;
+using System.IO;
+using System.Text;
 
 namespace Microsoft.Extensions.SecretManager.Tools.Internal
 {
@@ -11,41 +14,90 @@ namespace Microsoft.Extensions.SecretManager.Tools.Internal
         private readonly string _keyName;
         private readonly string _keyValue;
 
-        public static void Configure(CommandLineApplication command, CommandLineOptions options)
+        public static void Configure(ExtendedHelpCommandLineApplication command, CommandLineOptions options)
         {
             command.Description = "Sets the user secret to the specified value";
+            command.AdditionalHelpInfo = @"
+Additional Info:
+  This command will also handled piped input. Piped input is expected to be a valid JSON format.
+
+Examples:
+  dotnet user-secrets set ConnStr ""User ID=bob;Password=***""
+  cat secrets.json | dotnet user-secrets set";
+
             command.HelpOption();
 
-            var keyArg = command.Argument("[name]", "Name of the secret");
+            var nameARg = command.Argument("[name]", "Name of the secret");
             var valueArg = command.Argument("[value]", "Value of the secret");
 
             command.OnExecute(() =>
             {
-                if (keyArg.Value == null)
-                {
-                    throw new GracefulException("Missing parameter value for 'name'.\nUse the '--help' flag to see info.");
-                }
-
-                if (valueArg.Value == null)
-                {
-                    throw new GracefulException("Missing parameter value for 'value'.\nUse the '--help' flag to see info.");
-                }
-
-                options.Command = new SetCommand(keyArg.Value, valueArg.Value);
+                options.Command = new SetCommand(nameARg.Value, valueArg.Value);
             });
         }
 
-        public SetCommand(string keyName, string keyValue)
+        internal SetCommand(string keyName, string keyValue)
         {
+            Debug.Assert(keyName != null || keyValue == null, "Inconsistent state. keyValue must not be null if keyName is null.");
             _keyName = keyName;
             _keyValue = keyValue;
         }
 
-        public void Execute(SecretsStore store, ILogger logger)
+        internal SetCommand()
+        { }
+
+        public void Execute(CommandContext context)
         {
-            store.Set(_keyName, _keyValue);
-            store.Save();
-            logger.LogInformation(Resources.Message_Saved_Secret, _keyName, _keyValue);
+            if (context.Console.IsInputRedirected && _keyName == null)
+            {
+                ReadFromInput(context);
+            }
+            else
+            {
+                SetFromArguments(context);
+            }
+        }
+
+        private void ReadFromInput(CommandContext context)
+        {
+            // parses stdin with the same parser that Microsoft.Extensions.Configuration.Json would use
+            var provider = new ReadableJsonConfigurationProvider();
+            using (var stream = new MemoryStream())
+            {
+                using (var writer = new StreamWriter(stream, Encoding.Unicode, 1024, true))
+                {
+                    writer.Write(context.Console.In.ReadToEnd()); // TODO buffer?
+                }
+
+                stream.Seek(0, SeekOrigin.Begin);
+                provider.Load(stream);
+            }
+
+            foreach (var k in provider.CurrentData)
+            {
+                context.SecretStore.Set(k.Key, k.Value);
+            }
+
+            context.Logger.LogInformation(Resources.Message_Saved_Secrets, provider.CurrentData.Count);
+
+            context.SecretStore.Save();
+        }
+
+        private void SetFromArguments(CommandContext context)
+        {
+            if (_keyName == null)
+            {
+                throw new GracefulException(Resources.FormatError_MissingArgument("name"));
+            }
+
+            if (_keyValue == null)
+            {
+                throw new GracefulException((Resources.FormatError_MissingArgument("value")));
+            }
+
+            context.SecretStore.Set(_keyName, _keyValue);
+            context.SecretStore.Save();
+            context.Logger.LogInformation(Resources.Message_Saved_Secret, _keyName, _keyValue);
         }
     }
 }

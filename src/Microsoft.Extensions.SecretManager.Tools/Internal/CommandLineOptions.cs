@@ -1,7 +1,6 @@
 // Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
-using System.IO;
 using System.Reflection;
 using Microsoft.Extensions.CommandLineUtils;
 
@@ -9,16 +8,18 @@ namespace Microsoft.Extensions.SecretManager.Tools.Internal
 {
     public class CommandLineOptions
     {
+        public string Id { get; set; }
         public bool IsVerbose { get; set; }
         public bool IsHelp { get; set; }
         public string Project { get; set; }
         internal ICommand Command { get; set; }
 
-        public static CommandLineOptions Parse(string[] args, TextWriter output)
+        public static CommandLineOptions Parse(string[] args, IConsole console)
         {
             var app = new CommandLineApplication()
             {
-                Out = output,
+                Out = console.Out,
+                Error = console.Error,
                 Name = "dotnet user-secrets",
                 FullName = "User Secrets Manager",
                 Description = "Manages user secrets"
@@ -33,8 +34,16 @@ namespace Microsoft.Extensions.SecretManager.Tools.Internal
             var optionProject = app.Option("-p|--project <PROJECT>", "Path to project, default is current directory",
                 CommandOptionType.SingleValue, inherited: true);
 
+            // the escape hatch if project evaluation fails, or if users want to alter a secret store other than the one
+            // in the current project
+            var optionId = app.Option("--id", "The user secret id to use.",
+                CommandOptionType.SingleValue, inherited: true);
+
             var options = new CommandLineOptions();
-            app.Command("set", c => SetCommand.Configure(c, options));
+            var setCommand = new ExtendedHelpCommandLineApplication { Parent = app, Name = "set" };
+            SetCommand.Configure(setCommand, options);
+
+            app.Commands.Add(setCommand);
             app.Command("remove", c => RemoveCommand.Configure(c, options));
             app.Command("list", c => ListCommand.Configure(c, options));
             app.Command("clear", c => ClearCommand.Configure(c, options));
@@ -48,6 +57,7 @@ namespace Microsoft.Extensions.SecretManager.Tools.Internal
                 return null;
             }
 
+            options.Id = optionId.Value();
             options.IsHelp = app.IsShowingInformation;
             options.IsVerbose = optionVerbose.HasValue();
             options.Project = optionProject.Value();

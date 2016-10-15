@@ -19,10 +19,10 @@ namespace Microsoft.Extensions.SecretManager.Tools.Internal
             });
         }
 
-        public void Execute(SecretsStore store, ILogger logger)
+        public void Execute(CommandContext context)
         {
-            store.Clear();
-            store.Save();
+            context.SecretStore.Clear();
+            context.SecretStore.Save();
         }
     }
 }

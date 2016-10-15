@@ -33,16 +33,16 @@ namespace Microsoft.Extensions.SecretManager.Tools.Internal
             _keyName = keyName;
         }
 
-        public void Execute(SecretsStore store, ILogger logger)
+        public void Execute(CommandContext context)
         {
-            if (!store.ContainsKey(_keyName))
+            if (!context.SecretStore.ContainsKey(_keyName))
             {
-                logger.LogWarning(Resources.Error_Missing_Secret, _keyName);
+                context.Logger.LogWarning(Resources.Error_Missing_Secret, _keyName);
             }
             else
             {
-                store.Remove(_keyName);
-                store.Save();
+                context.SecretStore.Remove(_keyName);
+                context.SecretStore.Save();
             }
         }
     }
